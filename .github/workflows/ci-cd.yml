@@ -1,0 +1,74 @@
+name: Laravel CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/*'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  # Feature Branch CI (No Docker)
+  feature-ci:
+    if: startsWith(github.ref, 'refs/heads/feature/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install PHP & Composer
+        run: |
+          sudo apt update
+          sudo apt install -y php-cli php-mbstring unzip curl
+          curl -sS https://getcomposer.org/installer | php
+          mv composer.phar /usr/local/bin/composer
+
+      - name: Install Composer Dependencies
+        run: composer install --no-dev --optimize-autoloader
+
+      - name: Setup Laravel
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Run Tests
+        run: php artisan test --env=testing
+
+  # Develop & Main CI (Docker)
+  docker-ci:
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: laravel
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_USER: laraveluser
+          MYSQL_PASSWORD: secret
+        ports:
+          - 3306:3306
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Docker Build & Run
+        run: |
+          docker-compose -f docker-compose.yml up -d --build
+
+      - name: Setup Laravel in Docker
+        run: |
+          docker exec laravel_app composer install --no-dev --optimize-autoloader
+          docker exec laravel_app cp .env.development .env
+          docker exec laravel_app php artisan key:generate
+          docker exec laravel_app php artisan migrate --force
+
+      - name: Run Tests in Docker
+        run: |
+          docker exec laravel_app php artisan test --env=testing
